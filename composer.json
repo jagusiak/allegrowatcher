@@ -1,0 +1,7 @@
+{
+    "name": "Seweryn",
+    "require" : {
+        "jagusiak/jsonsimplestorage" : "*",
+        "symfony/console" : "*"
+    }
+}
