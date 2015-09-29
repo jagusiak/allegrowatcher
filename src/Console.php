@@ -6,13 +6,13 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
-require 'QueryStorage.php';
-require 'EmailStorage.php';
-require 'SettingsStorage.php';
-require 'ResponseStorage.php';
-require 'AllegroApi.php';
-require 'AllegroFilters.php';
-require 'RunQuery.php';
+require 'models/QueryStorage.php';
+require 'models/EmailStorage.php';
+require 'models/SettingsStorage.php';
+require 'models/ResponseStorage.php';
+require 'helpers/AllegroHelper.php';
+require 'libraries/QueryExecutor.php';
+require 'libraries/AllegroApi.php';
 
 class Console extends Application {
 
@@ -40,10 +40,7 @@ class Console extends Application {
         $command->setDefinition(array(
             new InputArgument('query', InputArgument::REQUIRED, 'Phrase to search'),
             new InputArgument('id', InputArgument::OPTIONAL, 'Query identifier'),
-            new InputOption('only-new', null, InputOption::VALUE_NONE, 'Search only new items'),
-            new InputOption('only-buy-now', null, InputOption::VALUE_NONE, 'Search only buy now items'),
-            new InputOption('min-price', null, InputOption::VALUE_REQUIRED, 'Minimal price'),
-            new InputOption('max-price', null, InputOption::VALUE_REQUIRED, 'Maximal price'),
+            new InputOption('filters', null, InputOption::VALUE_REQUIRED, 'Filters data'),
         ));
 
         // set description
@@ -56,7 +53,7 @@ class Console extends Application {
                     $storage = QueryStorage::getInstance();
 
                     // create data
-                    $data = QueryStorage::createQuery($input->getArgument('query'), $input->getOption('only-new'), $input->getOption('only-buy-now'), $input->getOption('min-price'), $input->getOption('max-price'));
+                    $data = QueryStorage::createQuery($input->getArgument('query'), $input->getOption('filters'));
 
                     // existing ids
                     $ids = $storage->getIds();
@@ -115,7 +112,6 @@ class Console extends Application {
 
         // set description
         $command->setDescription('Shows all queries');
-
 
         // set action
         $command->setCode(function (InputInterface $input, OutputInterface $output) {
@@ -283,28 +279,28 @@ class Console extends Application {
 
                     // get argument id
                     $id = $input->getArgument('id');
-                    
+
                     $setting = SettingsStorage::getInstance();
-                        $code = $setting->getById('code');
-                        $key = $setting->getById('key');
+                    $code = $setting->getById('code');
+                    $key = $setting->getById('key');
 
-                        if (empty($code)) {
-                            $code = 1;
-                        } else {
-                            $code = (int) $code['value'];
-                        }
+                    if (empty($code)) {
+                        $code = 1;
+                    } else {
+                        $code = (int) $code['value'];
+                    }
 
-                        if (empty($key)) {
-                            $output->writeln("Allegro web api key not set, use 'config key XXXXXX' to configure");
-                            return;
-                        } else {
-                            $key = $key['value'];
-                        }
-                        
+                    if (empty($key)) {
+                        $output->writeln("Allegro web api key not set, use 'config key XXXXXX' to configure");
+                        return;
+                    } else {
+                        $key = $key['value'];
+                    }
+
 
                     if (empty($id)) {
                         foreach (QueryStorage::getInstance()->getAll() as $id => $data) {
-                            $newItems = (new RunQuery($id))->execute(new AllegroApi($key, $code));
+                            $newItems = (new QueryExecutor($id))->execute(new AllegroApi($key, $code));
 
                             $output->writeln("$id: $newItems new item(s) found");
                         }
@@ -316,14 +312,13 @@ class Console extends Application {
                             return;
                         }
 
-                        $newItems = (new RunQuery($id))->execute(new AllegroApi($key, $code));
+                        $newItems = (new QueryExecutor($id))->execute(new AllegroApi($key, $code));
 
                         $output->writeln("$newItems new item(s) found");
                     }
                 });
     }
 
-    
     private function registerFilters() {
         $command = $this->register('filters');
 
@@ -342,7 +337,7 @@ class Console extends Application {
 
                     // get argument id
                     $query = $input->getArgument('query');
-                    
+
                     $setting = SettingsStorage::getInstance();
                     $code = $setting->getById('code');
                     $key = $setting->getById('key');
@@ -359,29 +354,22 @@ class Console extends Application {
                     } else {
                         $key = $key['value'];
                     }
-                    
+
                     $filters = $input->getOption('filters');
-                    if (!empty($filters)) {
-                        $filters = AllegroFilters::formatFilters($filters);
-                        //var_dump($filters);die;
-                    }
 
                     $api = new AllegroApi($key, $code);
-                    
+
                     // returns filters
-                    foreach (RunQuery::getFilters($api, $query, $filters) as $filter) {
+                    foreach (QueryExecutor::getFilters($api, $query, $filters) as $filter) {
                         $output->writeln(
-                            sprintf("<info>%-30s</info>\t%-30s\n%s\n",
-                                "<info>{$filter['name']} " . ($filter['range'] ? '=[min,max]' : '') . "</info>",
-                                $filter['description'],
-                                implode(', ', array_map(function($item) { return "{$item['value']} - '{$item['name']}'"; }, $filter['values']))
-                        ));
+                                sprintf("<info>%-30s</info>\t%-30s\n%s\n", "<info>{$filter['name']} " . ($filter['range'] ? '=[min,max]' : '') . "</info>", $filter['description'], implode(', ', array_map(function($item) {
+                                                            return "{$item['value']} - '{$item['name']}'";
+                                                        }, $filter['values']))
+                                ));
                     }
-                    
-                    
                 });
     }
-    
+
     private function registerCodes() {
         $command = $this->register('codes');
 
@@ -416,8 +404,7 @@ class Console extends Application {
                                             }, $countries)));
                 });
     }
-    
-    
+
     private function registerCategories() {
         $command = $this->register('categories');
 
@@ -446,11 +433,11 @@ class Console extends Application {
 
                     $api = new AllegroApi($key, $code);
                     $categories = $api->getCategories();
-                    
+
                     $tree = [];
                     $names = [];
-                    
-                    
+
+
                     foreach ($api->getCategories() as $category) {
                         if (empty($tree[$category->{"cat-parent"}])) {
                             $tree[$category->{"cat-parent"}] = [];
@@ -458,12 +445,11 @@ class Console extends Application {
                         $tree[$category->{"cat-parent"}][] = $category->{"cat-id"};
                         $names[$category->{"cat-id"}] = $category->{"cat-name"};
                     }
-                    
+
                     $this->printCategoryTree($tree, $names);
-                    
                 });
     }
-    
+
     private function printCategoryTree($tree, $names, $key = 0, $level = 0) {
         foreach ($tree[$key] as $sub) {
             echo sprintf("%12d %s\n", $sub, str_repeat("\t", $level) . $names[$sub]);

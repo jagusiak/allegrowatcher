@@ -1,12 +1,23 @@
 <?php
 
-class RunQuery {
+/**
+ * Executes queries
+ * 
+ * @author Seweryn Jagusik <jagusiak@gmail.com>
+ */
+class QueryExecutor {
     
     private $query;
     private $emails;
     private $responses;
     private $queryId;
     
+    /**
+     * Create new query exector
+     * 
+     * @param mixed $id Qeery id
+     * @throws Exception
+     */
     public function __construct($id) {
         $queryStorage = QueryStorage::getInstance();
         
@@ -22,6 +33,14 @@ class RunQuery {
         $this->queryId = $id;
     }
     
+    /**
+     * Return all possible filters for query
+     * 
+     * @param AllegroApi $api
+     * @param string $query
+     * @param string $filters
+     * @return array
+     */
     public function getFilters(AllegroApi $api, $query, $filters = null) {
         // process
         return array_map(function ($filter) {
@@ -41,8 +60,14 @@ class RunQuery {
         
     }
     
+    /**
+     * Executes query
+     * 
+     * @param AllegroApi $api
+     * @return int
+     */
     public function execute(AllegroApi $api) {
-        $result = $api->searchItems($this->query);
+        $result = $api->searchItems($this->query['query'], isset($this->query['filters']) ? $this->query['filters'] : null);
         
         $response = ResponseStorage::getInstance();
         
@@ -64,7 +89,7 @@ class RunQuery {
         
         $response->save();
         
-        $mail = $this->createEmail($filteredData);
+        $mail = AllegroHelper::createEmail($filteredData);
         
         foreach ($this->emails as $emailData) {
             mail(
@@ -76,19 +101,6 @@ class RunQuery {
         }
         
         return count($filteredData);
-    }
-    
-    private function createEmail($data) {
-        $headView = file_get_contents(dirname(__FILE__). '/../email/head.html');
-        $itemView = file_get_contents(dirname(__FILE__). '/../email/item.html');
-        $footerView = file_get_contents(dirname(__FILE__). '/../email/footer.html');
-        
-        return $headView . implode('', array_map(function($item) use ($itemView) {
-            return str_replace(
-                    ['[[URL]]', '[[NAME]]', '[[PRICE]]'], 
-                    ['http://allegro.pl/listing/listing.php?string=' . urlencode($item['title']), $item['title'], sprintf('%.2f' ,$item['price'])], 
-                    $itemView);
-        }, $data)) . $footerView;
     }
     
     
